@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 )
@@ -25,6 +26,18 @@ type MockRoundTripper struct {
 func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
 	return args.Get(0).(*http.Response), args.Error(1)
+}
+
+// GetEnvCredentials gets credentials from environment variables.
+func GetEnvCredentials() (string, string, string) {
+	ghostURL := os.Getenv("GHOST_URL")
+	contentAPIKey := os.Getenv("CONTENT_API_KEY")
+	adminAPIKey := os.Getenv("ADMIN_API_KEY")
+
+	if ghostURL == "" || contentAPIKey == "" || adminAPIKey == "" {
+		panic("Missing environment variables. Please set GHOST_URL, CONTENT_API_KEY, and ADMIN_API_KEY.")
+	}
+	return ghostURL, contentAPIKey, adminAPIKey
 }
 
 func (m *MockHTTPClient) Do(req *http.Request) (*http.Response, error) {
