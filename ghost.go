@@ -24,6 +24,7 @@ const (
 )
 
 type Client interface {
+	GetPosts(ctx context.Context) ([]Post, error)
 	//	Do(req *http.Request) (*http.Response, error)
 }
 
