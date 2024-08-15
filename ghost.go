@@ -71,19 +71,19 @@ func NewClient(baseURL string, opts ...ClientOption) Client {
 	return c
 }
 
-func withContentAPIKey(key string) ClientOption {
+func WithContentAPIKey(key string) ClientOption {
 	return func(c *client) {
 		c.contentAPIKey = key
 	}
 }
 
-func withAdminAPIKey(key string) ClientOption {
+func WithAdminAPIKey(key string) ClientOption {
 	return func(c *client) {
 		c.adminAPIKey = key
 	}
 }
 
-func withHTTPClient(httpClient *http.Client) ClientOption {
+func WithHTTPClient(httpClient *http.Client) ClientOption {
 	// Return a function that sets the HTTP client on the client
 	return func(c *client) {
 		c.httpClient = httpClient

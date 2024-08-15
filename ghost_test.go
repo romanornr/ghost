@@ -52,7 +52,7 @@ func TestNewClient(t *testing.T) {
 func TestWithContentAPIKey(t *testing.T) {
 	c := &client{}
 	key := "test-content-api-key"
-	withContentAPIKey(key)(c)
+	WithContentAPIKey(key)(c)
 
 	assert.Equal(t, key, c.contentAPIKey)
 }
@@ -60,7 +60,7 @@ func TestWithContentAPIKey(t *testing.T) {
 func TestWithAdminAPIKey(t *testing.T) {
 	c := &client{}
 	key := "test-admin-api-key"
-	withAdminAPIKey(key)(c)
+	WithAdminAPIKey(key)(c)
 
 	assert.Equal(t, key, c.adminAPIKey)
 }
