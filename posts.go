@@ -44,7 +44,7 @@ type Posts struct {
 }
 
 func (c *client) GetPosts(ctx context.Context) ([]Post, error) {
-	resp, err := c.doRequest(ctx, GET, "/ghost/api/v3/content/posts", nil)
+	resp, err := c.doRequest(ctx, GET, "/ghost/api/admin/posts", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get posts: %w", err)
 	}
