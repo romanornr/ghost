@@ -111,7 +111,7 @@ func (c *client) getJWTToken(ctx context.Context) (string, error) {
 		return c.jwtToken, nil
 	}
 
-	token, expiredAt, err := c.generateJWTToken()
+	token, expiredAt, err := c.generateJWTToken(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JWT token: %w", err)
 	}
@@ -126,38 +126,62 @@ func (c *client) getJWTToken(ctx context.Context) (string, error) {
 // It uses the admin API key and its secret to sign the token using the HS256 signing method.
 // The token expires in 5 minutes from the current time.
 // It returns the generated token as a string, the expiration time, and an error if it fails to generate the token.
-func (c *client) generateJWTToken() (string, time.Time, error) {
-	now := time.Now().Unix()
+func (c *client) generateJWTToken(ctx context.Context) (string, time.Time, error) {
 
-	// expire in 5 minutes
-	expiresAt := now + 5*60
-
-	keyParts := strings.Split(c.adminAPIKey, ":")
-	if len(keyParts) != 2 {
-		return "", time.Time{}, fmt.Errorf("invalid admin API key format")
+	type result struct {
+		token     string
+		expiresAt time.Time
+		err       error
 	}
 
-	id := keyParts[0]
-	secret, err := hex.DecodeString(keyParts[1])
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to decode admin API key secret: %w", err)
+	resultCh := make(chan result)
+
+	go func() {
+
+		defer close(resultCh)
+
+		//expire in 5 minutes
+		now := time.Now().Unix()
+		expiresAt := now + 5*60
+
+		keyParts := strings.Split(c.adminAPIKey, ":")
+		if len(keyParts) != 2 {
+			resultCh <- result{err: fmt.Errorf("invalid admin API key format")}
+		}
+
+		id := keyParts[0]
+		secret, decodeErr := hex.DecodeString(keyParts[1])
+		if decodeErr != nil {
+			resultCh <- result{err: fmt.Errorf("failed to decode admin API key secret: %w", decodeErr)}
+		}
+
+		claims := jwt.MapClaims{
+			"aud": "/v3/admin/",
+			"exp": expiresAt,
+			"iat": now + 300,
+		}
+
+		jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		jwtToken.Header["kid"] = id
+
+		token, err := jwtToken.SignedString(secret)
+		if err != nil {
+			resultCh <- result{err: fmt.Errorf("failed to sign JWT token: %w", err)}
+			return
+		}
+		resultCh <- result{token: token, expiresAt: time.Unix(expiresAt, 0)}
+	}()
+
+	// Wait for the operation to complete or the context to be canceled
+	select {
+	case <-ctx.Done():
+		return "", time.Time{}, ctx.Err()
+	case r, ok := <-resultCh:
+		if !ok {
+			return "", time.Time{}, fmt.Errorf("channel closed unexpectedly")
+		}
+		return r.token, r.expiresAt, r.err
 	}
-
-	claims := jwt.MapClaims{
-		"aud": "/v3/admin/",
-		"exp": expiresAt,
-		"iat": now + 300,
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token.Header["kid"] = id
-
-	tokenString, err := token.SignedString(secret)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to sign JWT token: %w", err)
-	}
-
-	return tokenString, time.Unix(expiresAt, 0), nil
 }
 
 // ensureAuth ensures that the client has a valid JWT token. If the token is empty or expired,
@@ -169,7 +193,7 @@ func (c *client) ensureAuth(ctx context.Context) error {
 	defer c.mutex.Unlock()
 
 	if c.jwtToken == "" || time.Now().After(c.jwtExpiresAt) {
-		token, expiresAt, err := c.generateJWTToken()
+		token, expiresAt, err := c.generateJWTToken(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to generate JWT token: %w", err)
 		}
