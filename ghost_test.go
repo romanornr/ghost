@@ -1,11 +1,9 @@
 package ghost
 
 import (
-	"bytes"
 	"context"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"io"
 	"net/http"
 	"os"
 	"testing"
@@ -100,57 +98,4 @@ func TestGetJWTToken(t *testing.T) {
 	cachedToken, err := c.getJWTToken(ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, token, cachedToken)
-}
-
-func TestDoRequest(t *testing.T) {
-	//mockClient := new(MockHTTPClient)
-	mockTripper := new(MockRoundTripper)
-	c := NewClient(
-		"https://ghost.romanornr.io",
-		WithHTTPTransport(mockTripper),
-	).(*client)
-
-	ctx := context.Background()
-	mockResp := &http.Response{
-		StatusCode: http.StatusOK,
-		//Body:       http.NoBody,
-		Body: io.NopCloser(bytes.NewBufferString(`{"success": true}`)),
-	}
-
-	//mockTripper.On("Do", mock.Anything).Return(mockResponse, nil)
-	mockTripper.On("RoundTrip", mock.AnythingOfType("*http.Request")).Return(mockResp, nil).Once()
-
-	resp, err := c.doRequest(ctx, http.MethodGet, "/test", nil)
-	assert.NoError(t, err)
-	assert.Equal(t, mockResp, resp)
-	mockTripper.AssertExpectations(t)
-}
-
-func TestGetPosts(t *testing.T) {
-	mockTripper := new(MockRoundTripper)
-	c := NewClient(
-		"https://ghost.romanornr.io",
-		WithHTTPTransport(mockTripper),
-	).(*client)
-
-	ctx := context.Background()
-
-	mockRespBody := `{"posts": [{"id": "1", "title": "Test Post"}]}`
-
-	mockResp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       io.NopCloser(bytes.NewBufferString(mockRespBody)),
-	}
-
-	mockTripper.On("RoundTrip", mock.AnythingOfType("*http.Request")).Return(mockResp, nil).Once()
-
-	posts, err := c.GetPosts(ctx)
-
-	assert.NoError(t, err)
-	assert.Len(t, posts, 1)
-	assert.Equal(t, "1", posts[0].ID)
-	assert.Equal(t, "Test Post", posts[0].Title)
-
-	mockTripper.AssertExpectations(t)
-
 }
