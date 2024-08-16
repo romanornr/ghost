@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/golang-jwt/jwt/v5"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -23,8 +24,14 @@ const (
 	DELETE HTTPMethod = http.MethodDelete
 )
 
+// Client is an interface that defines methods for interacting with a remote API.
+// Implementations of the Client interface should provide functionality for retrieving posts
+// and members from the API. The GetPosts method retrieves a list of posts, and the GetMembers method
+// retrieves a list of members. Both methods accept a context.Context parameter for cancellation
+// and deadline propagation.
 type Client interface {
 	GetPosts(ctx context.Context) ([]Post, error)
+	GetMembers(ctx context.Context) (Members, error)
 	//	Do(req *http.Request) (*http.Response, error)
 }
 
@@ -54,7 +61,7 @@ type ClientOption func(*client)
 // The options are applied to the client in the order they are provided.
 // Example usage:
 //
-//	client := NewClient("https://api.example.com", WithTimeout(30*time.Second), WithRetry(3))
+//	client := NewClient("https://api.example.com", client.WithAdminAPIKey("admin-key"))
 func NewClient(baseURL string, opts ...ClientOption) Client {
 	c := &client{
 		baseURL: baseURL,
@@ -90,6 +97,12 @@ func WithHTTPClient(httpClient *http.Client) ClientOption {
 	}
 }
 
+// getJWTToken retrieves a JWT token for API authentication.
+// If the token is already available and not expired, it returns the token without generating a new one.
+// Otherwise, it calls generateJWTToken to generate a new token, updates the client's jwtToken and jwtExpiresAt fields,
+// and returns the generated token.
+// It acquires a lock on the client mutex to ensure thread-safe access to the client fields.
+// It returns the JWT token as a string and an error if it fails to generate the token.
 func (c *client) getJWTToken(ctx context.Context) (string, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
@@ -109,6 +122,10 @@ func (c *client) getJWTToken(ctx context.Context) (string, error) {
 	return token, nil
 }
 
+// generateJWTToken generates a JWT token with the necessary claims and headers.
+// It uses the admin API key and its secret to sign the token using the HS256 signing method.
+// The token expires in 5 minutes from the current time.
+// It returns the generated token as a string, the expiration time, and an error if it fails to generate the token.
 func (c *client) generateJWTToken() (string, time.Time, error) {
 	now := time.Now().Unix()
 
@@ -143,6 +160,29 @@ func (c *client) generateJWTToken() (string, time.Time, error) {
 	return tokenString, time.Unix(expiresAt, 0), nil
 }
 
+// ensureAuth ensures that the client has a valid JWT token. If the token is empty or expired,
+// it generates a new JWT token and updates the client's jwtToken and jwtExpiresAt fields.
+// It acquires a lock on the client mutex to ensure thread-safe access to the client fields.
+// It returns an error if it fails to generate the JWT token.
+func (c *client) ensureAuth(ctx context.Context) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if c.jwtToken == "" || time.Now().After(c.jwtExpiresAt) {
+		token, expiresAt, err := c.generateJWTToken()
+		if err != nil {
+			return fmt.Errorf("failed to generate JWT token: %w", err)
+		}
+
+		c.jwtToken = token
+		c.jwtExpiresAt = expiresAt
+	}
+	return nil
+}
+
+// doRequest sends an HTTP request to the specified URL using the given HTTP method.
+// It optionally includes a request body and adds the necessary headers, including the JWT token.
+// It returns the HTTP response and an error if the request fails.
 func (c *client) doRequest(ctx context.Context, method HTTPMethod, path string, body interface{}) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.baseURL, path)
 
@@ -160,17 +200,18 @@ func (c *client) doRequest(ctx context.Context, method HTTPMethod, path string, 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if strings.Contains(path, "admin") {
-		jwtToken, err := c.getJWTToken(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get JWT token: %w", err)
-		}
-		req.Header.Set("Authorization", "Ghost "+jwtToken)
-	} else if c.contentAPIKey != "" {
-		req.Header.Set("Authorization", "Ghost "+c.contentAPIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	jwtToken, err := c.getJWTToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get JWT token: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Ghost "+jwtToken)
+	req.Header.Add("Accept-Version", "v3.0")
+
+	log.Printf("Making request to: %s", url)
+	log.Printf("Headers: %v", req.Header)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
