@@ -22,7 +22,7 @@ import (
 )
 
 func main() {
-    client := ghost.NewClient("http://example.ghost.io", ghost.WithAdminAPIKey("your-admin-api-key"))
+    client := ghost.NewClient("http://example.ghost.io", ghost.WithAdminAPIKey("your-admin-api-key"), ghost.WithContentAPIKey("your-content-api-key"))
     ctx := context.Background()
     posts, err := client.GetPosts(ctx)
     if err != nil {
