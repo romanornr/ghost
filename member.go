@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -20,6 +21,25 @@ type NewMembers struct {
 //const membersPath = "/ghost/api/admin/members/?key=%s&limit=all"
 //const membersPathAll = "/ghost/api/v3/admin/members/?key=%s&limit=all"
 
+// MembersResponse represents the API response structure for members
+type MembersResponse struct {
+	Members []Member `json:"members"`
+	Meta    struct {
+		Pagination PaginationInfo `json:"pagination"`
+	} `json:"meta"`
+}
+
+// PaginationInfo represents the pagination metadata from Ghost's API
+type PaginationInfo struct {
+	Page  int `json:"page"`
+	Limit int `json:"limit"`
+	Pages int `json:"pages"`
+	Total int `json:"total"`
+	Next  int `json:"next,omitempty"`
+	Prev  int `json:"prev,omitempty"`
+}
+
+// Member represents a member entity with detailed attributes including id, uuid, email, name, and subscription info.
 type Member struct {
 	Id          string      `json:"id"`
 	Uuid        string      `json:"uuid"`
@@ -50,6 +70,7 @@ type NewMember struct {
 	Email string `json:"email"`
 }
 
+// Subscription represents a subscription entity, including the customer's details and the subscription's status and pricing.
 type Subscription struct {
 	Id       string `json:"id"`
 	Customer struct {
@@ -102,4 +123,120 @@ func (c *client) GetMembers(ctx context.Context) (Members, error) {
 	}
 
 	return membersResp, nil
+}
+
+// GetAllMembers retrieves all members from the server using pagination
+func (c *client) GetAllMembers(ctx context.Context) ([]Member, error) {
+	var allMembers []Member
+	page := 1
+	limit := 100 // Ghost's default limit
+
+	for {
+		members, response, err := c.getMembersPage(ctx, page, limit)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get members page %d: %w", page, err)
+		}
+
+		allMembers = append(allMembers, members...)
+
+		// Check if we've retrieved all pages
+		if page >= response.Meta.Pagination.Pages {
+			break
+		}
+
+		page++
+	}
+
+	return allMembers, nil
+}
+
+// getMembersPage retrieves a single page of members from the server
+func (c *client) getMembersPage(ctx context.Context, page, limit int) ([]Member, MembersResponse, error) {
+	path := fmt.Sprintf("/ghost/api/v3/admin/members/?page=%d&limit=%d", page, limit)
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, MembersResponse{}, fmt.Errorf("failed to get members: %w", err)
+	}
+
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, MembersResponse{}, fmt.Errorf("unexpected response status: %s", resp.Status)
+	}
+
+	var membersResp MembersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&membersResp); err != nil {
+		return nil, MembersResponse{}, fmt.Errorf("failed to decode members response: %w", err)
+	}
+
+	return membersResp.Members, membersResp, nil
+}
+
+// GetPaidAndCompedMembers retrieves all paid and comped members in paginated form and returns them as a collection.
+func (c *client) GetPaidAndCompedMembers(ctx context.Context) (Members, error) {
+	var allMembers []Member
+	page := 1
+	limit := 100
+
+	for {
+		members, response, err := c.getPaidMembersPage(ctx, page, limit)
+		if err != nil {
+			return Members{}, fmt.Errorf("failed to get paid members page %d: %w", page, err)
+		}
+
+		allMembers = append(allMembers, members...)
+
+		// Check if we've retrieved all pages
+		if page >= response.Meta.Pagination.Pages {
+			break
+		}
+
+		page++
+	}
+
+	return Members{allMembers}, nil
+}
+
+// getPaidMembersPage retrieves a paginated list of paid members from the Ghost API.
+// ctx: context for the request.
+// page: page number to retrieve.
+// limit: number of members per page.
+// Returns a slice of Member, *MembersResponse, and error.
+func (c *client) getPaidMembersPage(ctx context.Context, page, limit int) ([]Member, *MembersResponse, error) {
+	query := url.Values{}
+	query.Add("page", fmt.Sprintf("%d", page))
+	query.Add("limit", fmt.Sprintf("%d", limit))
+	query.Add("filter", "status:-free") // Ghost's filter for non-free members
+	query.Add("include", "subscriptions")
+
+	path := fmt.Sprintf("/ghost/api/v3/admin/members/?%s", query.Encode())
+
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get members: %w", err)
+	}
+
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Printf("failed to close response body: %v", err)
+		}
+	}(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil, fmt.Errorf("unexpected response status: %s", resp.Status)
+	}
+
+	var membersResp MembersResponse
+	if err := json.NewDecoder(resp.Body).Decode(&membersResp); err != nil {
+		return nil, nil, fmt.Errorf("failed to decode members response: %w", err)
+	}
+
+	return membersResp.Members, &membersResp, nil
 }

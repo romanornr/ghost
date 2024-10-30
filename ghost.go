@@ -32,6 +32,8 @@ const (
 type Client interface {
 	GetPosts(ctx context.Context) ([]Post, error)
 	GetMembers(ctx context.Context) (Members, error)
+	GetAllMembers(ctx context.Context) ([]Member, error)
+	GetPaidAndCompedMembers(ctx context.Context) (Members, error)
 	//	Do(req *http.Request) (*http.Response, error)
 }
 
